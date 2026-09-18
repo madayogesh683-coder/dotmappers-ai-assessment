@@ -34,5 +34,12 @@ def anomalies():
 
 @app.get("/query")
 def query(question: str):
+    # Try local dataset analysis first
+    local_answer = answer_query(question, df)
+
+    if not local_answer.startswith("I can answer questions"):
+        return {"answer": local_answer}
+
+    # Use Gemini only for questions that need LLM reasoning
     answer = generate_llm_answer(question, df)
     return {"answer": answer}

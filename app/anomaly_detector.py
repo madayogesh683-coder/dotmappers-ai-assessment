@@ -4,13 +4,7 @@ import pandas as pd
 def detect_anomalies(df: pd.DataFrame):
     results = []
 
-    # Convert created_at to datetime
-    df = df.copy()
-    df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce")
-
-    # --------------------------------------------------
     # 1. Abnormally long resolution times
-    # --------------------------------------------------
     if "resolution_time_hrs" in df.columns:
         long_tickets = df[
             df["resolution_time_hrs"].notna()
@@ -27,24 +21,41 @@ def detect_anomalies(df: pd.DataFrame):
                 )
             })
 
-    # --------------------------------------------------
     # 2. Unresolved high-priority tickets older than 24 hours
-    # --------------------------------------------------
-    if "priority" in df.columns and "status" in df.columns:
+    if (
+        "created_at" in df.columns
+        and "priority" in df.columns
+        and "status" in df.columns
+    ):
+        data = df.copy()
 
-        reference_time = df["created_at"].max()
+        data["created_at"] = pd.to_datetime(
+            data["created_at"],
+            errors="coerce"
+        )
 
-        unresolved_high_priority = df[
-            (df["priority"].astype(str).str.lower().isin(
-                ["high", "critical"]
-            ))
-            & (df["status"].astype(str).str.lower().isin(
-                ["open", "escalated"]
-            ))
-            & ((reference_time - df["created_at"]).dt.total_seconds() / 3600 > 24)
+        # Use the latest ticket timestamp as the reference point.
+        # This makes the detection reproducible.
+        reference_time = data["created_at"].max()
+
+        unresolved = ~data["status"].astype(str).str.lower().isin(
+            ["resolved", "closed"]
+        )
+
+        high_priority = data["priority"].astype(str).str.lower().isin(
+            ["high", "critical"]
+        )
+
+        older_than_24h = (
+            (reference_time - data["created_at"])
+            > pd.Timedelta(hours=24)
+        )
+
+        old_unresolved = data[
+            unresolved & high_priority & older_than_24h
         ]
 
-        for _, ticket in unresolved_high_priority.iterrows():
+        for _, ticket in old_unresolved.iterrows():
             age_hours = (
                 reference_time - ticket["created_at"]
             ).total_seconds() / 3600
@@ -53,8 +64,9 @@ def detect_anomalies(df: pd.DataFrame):
                 "ticket_id": ticket["ticket_id"],
                 "type": "Unresolved high-priority ticket",
                 "details": (
-                    f"{ticket['priority']} priority ticket has been "
-                    f"unresolved for {age_hours:.1f} hours"
+                    f"{ticket['priority']} priority ticket is "
+                    f"{age_hours:.1f} hours old and has status "
+                    f"{ticket['status']}"
                 )
             })
 
